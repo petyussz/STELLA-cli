@@ -1,0 +1,4 @@
+langchain==1.2.0
+langchain-core==1.2.6
+langchain-ollama==1.0.1
+halo==0.0.31
