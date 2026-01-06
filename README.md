@@ -52,9 +52,3 @@ Flags:
 - Consider updating `requirements.txt` to pin tested versions.
 - Add unit tests for `sanitize_command` and the safety heuristics.
 - Optionally, containerize this script for deployment parity with the larger project.
-
-**License**
-Repo inherits the author's preferred license. Check the original project for licensing details.
-
----
-File: `stella-cli.py` is the main entry point for the agent.
