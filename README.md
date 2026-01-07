@@ -1,3 +1,4 @@
+﻿```markdown
 # Mini STELLA CLI
 
 A compact, local version of the STELLA Linux agent. This lightweight script (`stella-cli.py`) is intended for running smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands.
@@ -9,6 +10,14 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 - Local LLM integration via Ollama (`langchain_ollama`).
 - Safe command execution with sanitization and heuristic risk checks.
 - Simple interactive REPL with history and optional debug output.
+
+**Prompt Framework**
+
+This project uses a concise prompt framework that encourages safe, auditable actions:
+
+- The system prompt asks the model to "Plan" briefly (a short Chain-of-Thought style reasoning) before issuing any action.
+- The model performs actions by invoking the `run_linux_command` tool; reasoning and execution are kept separate for safety and traceability.
+- For each action the agent estimates `sudo` and `risk`; the tool enforces confirmations and additional sanitization where necessary.
 
 **Requirements**
 
@@ -37,18 +46,27 @@ Flags:
 
 **Usage Notes & Security**
 
-- The script includes sanitization rules (timeouts for `ssh`, `curl`, `wget`, and `journalctl`/`systemctl` tweaks) and a set of heuristic checks for high-risk patterns (e.g., recursive `rm`, `mkfs`, `dd`, writes to `/etc`).
+- The script includes sanitization rules (timeouts for `ssh`, `curl`, `wget`, and `journalctl`/`systemctl` tweaks) and heuristic checks for high-risk patterns (e.g., recursive `rm`, `mkfs`, `dd`, writes to `/etc`).
 - Elevated actions (`sudo`) and medium/high/critical-risk commands require explicit user confirmation.
 - Interactive terminal programs (e.g., `vim`, `htop`) are blocked to avoid hanging the REPL.
 
-**Differences vs Stella-cli-docker**
+**Recent Changes (High Level)**
 
-- Mini version runs directly on the host (no Docker orchestration).
-- Designed for smaller, local model usage rather than large models in isolated containers.
-- Fewer components and simpler deployment for quick experimentation.
+- Added `sanitize_command` to automatically apply safe flags/timeouts for potentially hanging network or pager commands.
+- Implemented heuristic safety overrides that flag critical patterns (recursive removal, filesystem formatting, low-level `dd`, writes to system directories) and escalate risk to require explicit confirmation.
+- Switched the REPL to `prompt_toolkit` with `PromptSession` to provide command history and improved prompts.
+- Improved conversation memory trimming to avoid orphaned tool outputs when pruning long histories.
+- Added a `--debug` mode to expose model reasoning and raw subprocess stdout/stderr for troubleshooting.
+- Startup now waits for the model to load (spinner) to ensure the LLM context is allocated before use.
+
+**Security & Usage Notes**
+
+- The CLI is conservative: it prevents launching interactive TUI programs and prompts the user before any risky or elevated operations.
+- This script executes commands on the host  run it in a controlled environment and review commands before confirming execution.
 
 **Development / Next steps**
 
-- Consider updating `requirements.txt` to pin tested versions.
-- Add unit tests for `sanitize_command` and the safety heuristics.
-- Optionally, containerize this script for deployment parity with the larger project.
+- Consider pinning versions in `requirements.txt` and adding unit tests for `sanitize_command` and safety heuristics.
+- Optionally containerize for parity with the larger `Stella-cli-docker` project.
+
+```
