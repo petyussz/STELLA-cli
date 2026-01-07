@@ -12,7 +12,7 @@ from langchain.agents import create_agent
 # --- PROMPT TOOLKIT IMPORTS ---
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.ansi import ANSI
+from prompt_toolkit.formatted_text import ANSI
 
 # --- ARGUMENT PARSING ---
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
