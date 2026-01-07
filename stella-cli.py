@@ -6,9 +6,13 @@ import argparse
 from halo import Halo
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
-# Added ToolMessage and AIMessage for history slicing logic
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain.agents import create_agent
+
+# --- PROMPT TOOLKIT IMPORTS ---
+from prompt_toolkit import prompt, PromptSession
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.ansi import ANSI
 
 # --- ARGUMENT PARSING ---
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
@@ -147,7 +151,8 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     # Enforce confirmation if Sudo is used OR if risk is elevated
     if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
         try:
-            confirm = input(f"{c_risk}⚠️  CONFIRM EXECUTION?{NC} (yes/no): ")
+            # REPLACEMENT: using prompt_toolkit's prompt with ANSI wrapper
+            confirm = prompt(ANSI(f"{c_risk}⚠️  CONFIRM EXECUTION?{NC} (yes/no): "))
             if confirm.lower() != "yes":
                 return "Action denied by user."
         except EOFError:
@@ -224,11 +229,15 @@ if args.debug:
     print("\033[1;35m--- DEBUG MODE ENABLED ---\033[0m")
 print("Type 'exit' or 'bye' to quit or press Ctrl+C.")
 
+# Initialize Prompt Session for history support
+session = PromptSession(history=InMemoryHistory())
+
 messages = []
 
 while True:
     try:
-        user_input = input("\n\033[1;32mUser >>\033[0m ")
+        # REPLACEMENT: using session.prompt with ANSI wrapper
+        user_input = session.prompt(ANSI("\n\033[1;32mUser >>\033[0m "))
 
         if user_input.lower() in ["exit", "quit", "bye"]:
             print("Exiting...")
