@@ -31,15 +31,21 @@ This project uses a concise prompt framework that encourages safe, auditable act
 
 1. Install requirements:
 
+   ```bash
    pip install -r requirements.txt
+   ```
 
 2. Ensure Ollama is running if using Ollama models:
 
+   ```bash
    ollama serve
+   ```
 
 3. Run the agent:
 
+   ```bash
    python stella-cli.py --model ministral-3:8b
+   ```
 
 **Operating Modes**
 
@@ -47,7 +53,7 @@ This project uses a concise prompt framework that encourages safe, auditable act
 - **Single-shot**: Provide a prompt as arguments: `python stella-cli.py "what's my disk usage?"`
 - **Piped Input**: Analyze output from other commands: `systemctl status | python stella-cli.py "troubleshoot this"`
 
-Flags:
+**Flags**
 
 - `--model`: Ollama model to use (default: `ministral-3:8b`).
 - `--debug`: Show model reasoning and raw subprocess output.
@@ -70,9 +76,9 @@ Flags:
 **Security & Usage Notes**
 
 - The CLI is conservative: it prevents launching interactive TUI programs and prompts the user before any risky or elevated operations.
-- This script executes commands on the host  run it in a controlled environment and review commands before confirming execution.
+- This script executes commands on the host — run it in a controlled environment and review commands before confirming execution.
 
-**Development / Next steps**
+**Development / Next Steps**
 
 - Consider pinning versions in `requirements.txt` and adding unit tests for `sanitize_command` and safety heuristics.
 - Optionally containerize for parity with the larger `Stella-cli-docker` project.
