@@ -21,7 +21,7 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 ### Requirements
 * **Python:** 3.10+ (or compatible)
 * **Ollama:** Must be installed and running locally (`ollama serve`).
-* **Dependencies:** `halo`, `langchain_ollama`, `langchain_core` (see `requirements.txt`).
+* **Dependencies:** see `requirements.txt`.
 
 ### Quick Start
 
