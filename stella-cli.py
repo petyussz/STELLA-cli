@@ -1,5 +1,3 @@
-#!/mnt/archive/venvs/langchain/bin/python
-
 import subprocess
 import os
 import re
@@ -218,7 +216,7 @@ You are STELLA.
 1. Plan briefly.
 2. Execute with 'run_linux_command'.
 3. Summarize findings.
-4. Use Markdown.
+4. Use text only Markdown.
 
 CRITICAL INSTRUCTION: When calling 'run_linux_command', do NOT escape special characters like pipes (|), redirection (>), or quotes. Pass the raw command string exactly as it would be typed in a shell.
 """

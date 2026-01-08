@@ -9,7 +9,9 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 
 - Local LLM integration via Ollama (`langchain_ollama`).
 - Safe command execution with sanitization and heuristic risk checks.
-- Simple interactive REPL with history and optional debug output.
+- Three operation modes: interactive REPL, single-shot CLI arguments, and piped input analysis.
+- Rich terminal UI with Markdown rendering and themed output.
+- Command history and navigation support via `prompt_toolkit`.
 
 **Prompt Framework**
 
@@ -38,6 +40,12 @@ This project uses a concise prompt framework that encourages safe, auditable act
 3. Run the agent:
 
    python stella-cli.py --model ministral-3:8b
+
+**Operating Modes**
+
+- **Interactive**: Start without arguments for a conversational REPL with history.
+- **Single-shot**: Provide a prompt as arguments: `python stella-cli.py "what's my disk usage?"`
+- **Piped Input**: Analyze output from other commands: `systemctl status | python stella-cli.py "troubleshoot this"`
 
 Flags:
 
