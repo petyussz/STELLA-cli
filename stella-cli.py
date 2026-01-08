@@ -1,3 +1,5 @@
+#!/mnt/archive/venvs/langchain/bin/python
+
 import subprocess
 import os
 import re
@@ -28,6 +30,11 @@ custom_theme = Theme({
     "command": "bold yellow",
 })
 console = Console(theme=custom_theme)
+
+# --- CUSTOM EXCEPTION ---
+class UserAbort(Exception):
+    """Custom exception to stop agent execution immediately upon user denial."""
+    pass
 
 # --- ARGUMENT PARSING ---
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
@@ -149,12 +156,14 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     # --- CONFIRMATION ---
     if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
         if not sys.stdin.isatty():
-             return "Error: High risk command denied (Non-interactive mode)."
+             # In non-interactive mode, we can't ask, so we must abort if risky
+             raise UserAbort("High risk command denied (Non-interactive mode).")
         
         # NOTE: Because the spinner is stopped via the Handler, input() works here now.
         confirm = input(f"\033[33mExecute?\033[0m (y/n): ")
         if confirm.lower() not in ["y", "yes"]:
-            return "Action denied by user."
+            # --- CHANGE: RAISE EXCEPTION INSTEAD OF RETURNING STRING ---
+            raise UserAbort("Action denied by user.")
 
     forbidden = ["nano", "vim", "vi", "htop", "less", "more", "watch", "nvtop", "ptop", "telnet"] 
     if any(f" {t}" in cmd for t in forbidden) or cmd.startswith(tuple(forbidden)):
@@ -164,8 +173,6 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
         cmd = f"sudo {cmd}"
 
     # --- SUDO AUTHENTICATION HANDLER ---
-    # If the command requires sudo, we must ensure we have a cached sudo token.
-    # We run 'sudo -v' interactively so the user can type the password if needed.
     if actual_sudo:
         # check if we already have sudo rights without prompt
         sudo_check = subprocess.run("sudo -n true", shell=True, capture_output=True)
@@ -183,8 +190,6 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     # Execution Spinner
     with console.status("[dim]Running...[/dim]", spinner="dots"):
         try:
-            # Now run the actual command with capture_output=True.
-            # Since we ran 'sudo -v' above, this should not prompt for a password.
             result = subprocess.run(
                 cmd, shell=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT
             )
@@ -216,7 +221,7 @@ You are STELLA.
 1. Plan briefly.
 2. Execute with 'run_linux_command'.
 3. Summarize findings.
-4. Use text only Markdown.
+4. Use Markdown.
 
 CRITICAL INSTRUCTION: When calling 'run_linux_command', do NOT escape special characters like pipes (|), redirection (>), or quotes. Pass the raw command string exactly as it would be typed in a shell.
 """
@@ -265,14 +270,15 @@ if not sys.stdin.isatty():
 if args.prompt:
     prompt = " ".join(args.prompt).strip()
     try:
-        # For single shot, we can just use the status context manager as simple confirmation isn't as critical
-        # or we can use the handler. Let's use the handler for consistency.
         response = agent.invoke(
             {"messages": [HumanMessage(content=prompt)]},
             config={"callbacks": [SpinnerHandler(console)]}
         )
         console.print()
         console.print(Markdown(response['messages'][-1].content))
+    except UserAbort:
+        console.print("\n[bold yellow]Operation aborted by user.[/bold yellow]")
+        sys.exit(0)
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
     sys.exit(0)
@@ -302,7 +308,6 @@ while True:
         messages.append(HumanMessage(content=user_input))
         
         # Invoke agent with the SpinnerHandler callback
-        # The Handler takes care of starting/stopping the spinner
         response = agent.invoke(
             {"messages": messages},
             config={"callbacks": [spinner_handler]}
@@ -318,6 +323,9 @@ while True:
     except KeyboardInterrupt:
         console.print("\n[bold red]Quit.[/bold red]")
         break
+    except UserAbort:
+        # Catch the hard stop, print message, and loop back to input
+        console.print("\n[bold yellow]Operation aborted by user.[/bold yellow]")
     except EOFError:
         break
     except Exception as e:
