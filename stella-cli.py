@@ -1,5 +1,3 @@
-#!/mnt/archive/venvs/langchain/bin/python
-
 import subprocess
 import os
 import re
@@ -167,7 +165,7 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
 
     forbidden = ["nano", "vim", "vi", "htop", "less", "more", "watch", "nvtop", "ptop", "telnet"] 
     if any(f" {t}" in cmd for t in forbidden) or cmd.startswith(tuple(forbidden)):
-        return "Error: Interactive tools (vim, top, etc) are blocked."
+        raise UserAbort("Error: Interactive tools (vim, top, etc) are blocked.")
 
     if sudo and not cmd.startswith("sudo") and "|" not in cmd:
         cmd = f"sudo {cmd}"
@@ -223,7 +221,9 @@ You are STELLA.
 3. Summarize findings.
 4. Use Markdown.
 
-CRITICAL INSTRUCTION: When calling 'run_linux_command', do NOT escape special characters like pipes (|), redirection (>), or quotes. Pass the raw command string exactly as it would be typed in a shell.
+CRITICAL INSTRUCTION: When calling 'run_linux_command', 
+do NOT escape special characters like pipes (|), redirection (>), or quotes. 
+Pass the raw command string exactly as it would be typed in a shell.
 """
 )
 
