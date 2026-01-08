@@ -1,86 +1,92 @@
-﻿```markdown
-# Mini STELLA CLI
+﻿# Mini STELLA CLI
 
-A compact, local version of the STELLA Linux agent. This lightweight script (`stella-cli.py`) is intended for running smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands.
+A compact, local version of the STELLA Linux agent. This lightweight script (`stella-cli.py`) is designed to run smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands.
 
-This repository is a smaller sibling of the larger [Stella-cli-docker](https://github.com/petyussz/Stella-cli-docker) project, which targets bigger models running in isolated Docker environments and adds features for remote host management. The Mini STELLA CLI focuses on a minimal, easy-to-run experience for development and experimentation.
+This repository is a smaller sibling of the larger [Stella-cli-docker](https://github.com/petyussz/Stella-cli-docker) project. While the Docker version targets bigger models in isolated environments with remote host management, **Mini STELLA CLI** focuses on a minimal, easy-to-run experience for development and experimentation.
 
-**Features**
+---
 
-- Local LLM integration via Ollama (`langchain_ollama`).
-- Safe command execution with sanitization and heuristic risk checks.
-- Three operation modes: interactive REPL, single-shot CLI arguments, and piped input analysis.
-- Rich terminal UI with Markdown rendering and themed output.
-- Command history and navigation support via `prompt_toolkit`.
+## Key Features
 
-**Prompt Framework**
+* **Local LLM Integration:** Powered by Ollama (`langchain_ollama`) for privacy and speed.
+* **Safe Command Execution:** Includes sanitization, heuristic risk checks, and blocked interactive programs.
+* **Three Operation Modes:** Interactive REPL, Single-shot CLI, and Piped Input analysis.
+* **Rich Terminal UI:** Features Markdown rendering, themed output, and spinners.
+* **History & Navigation:** Robust command history support via `prompt_toolkit`.
 
-This project uses a concise prompt framework that encourages safe, auditable actions:
+---
 
-- The system prompt asks the model to "Plan" briefly (a short Chain-of-Thought style reasoning) before issuing any action.
-- The model performs actions by invoking the `run_linux_command` tool; reasoning and execution are kept separate for safety and traceability.
-- For each action the agent estimates `sudo` and `risk`; the tool enforces confirmations and additional sanitization where necessary.
+## Installation
 
-**Requirements**
+### Requirements
+* **Python:** 3.10+ (or compatible)
+* **Ollama:** Must be installed and running locally (`ollama serve`).
+* **Dependencies:** `halo`, `langchain_ollama`, `langchain_core` (see `requirements.txt`).
 
-- Python 3.10+ (or compatible)
-- Ollama running locally if using Ollama models (`ollama serve`).
-- Python dependencies (see `requirements.txt`): `halo`, `langchain_ollama`, `langchain_core`, etc.
+### Quick Start
 
-**Quick Start**
+1.  **Install Python dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-1. Install requirements:
+2.  **Ensure Ollama is running:**
+    ```bash
+    ollama serve
+    ```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+3.  **Run the agent:**
+    ```bash
+    python stella-cli.py --model ministral-3:8b
+    ```
 
-2. Ensure Ollama is running if using Ollama models:
+---
 
-   ```bash
-   ollama serve
-   ```
+## Usage Guide
 
-3. Run the agent:
+### Operating Modes
 
-   ```bash
-   python stella-cli.py --model ministral-3:8b
-   ```
+| Mode | Description | Example |
+| :--- | :--- | :--- |
+| **Interactive** | Start a conversational REPL with history. | `python stella-cli.py` |
+| **Single-shot** | Provide a prompt as a command-line argument. | `python stella-cli.py "what's my disk usage?"` |
+| **Piped Input** | Analyze output from other commands. | `systemctl status \| python stella-cli.py "troubleshoot this"` |
 
-**Operating Modes**
+### Command Line Flags
 
-- **Interactive**: Start without arguments for a conversational REPL with history.
-- **Single-shot**: Provide a prompt as arguments: `python stella-cli.py "what's my disk usage?"`
-- **Piped Input**: Analyze output from other commands: `systemctl status | python stella-cli.py "troubleshoot this"`
+* `--model`: Specify the Ollama model to use (default: `ministral-3:8b`).
+* `--debug`: Enable debug mode to view model reasoning, raw subprocess output, and internal logs.
 
-**Flags**
+---
 
-- `--model`: Ollama model to use (default: `ministral-3:8b`).
-- `--debug`: Show model reasoning and raw subprocess output.
+## Safety & Security Architecture
 
-**Usage Notes & Security**
+The CLI is designed to be conservative. It executes commands directly on the host, so strictly controlled environments and user review are essential.
 
-- The script includes sanitization rules (timeouts for `ssh`, `curl`, `wget`, and `journalctl`/`systemctl` tweaks) and heuristic checks for high-risk patterns (e.g., recursive `rm`, `mkfs`, `dd`, writes to `/etc`).
-- Elevated actions (`sudo`) and medium/high/critical-risk commands require explicit user confirmation.
-- Interactive terminal programs (e.g., `vim`, `htop`) are blocked to avoid hanging the REPL.
+### Safety Mechanisms
+* **Heuristic Risk Checks:** The system flags critical patterns (e.g., recursive `rm`, `mkfs`, `dd`, writes to `/etc`) and escalates them to require explicit confirmation.
+* **Command Sanitization:** Automatically applies timeouts and safe flags to potentially hanging network commands (e.g., `curl`, `wget`) or paging tools (`journalctl`).
+* **Blocked Programs:** Interactive TUI programs (e.g., `vim`, `htop`, `nano`) are blocked to prevent the REPL from hanging.
+* **Elevation Control:** Any action requiring `sudo` or deemed Medium/High/Critical risk triggers a user confirmation prompt.
 
-**Recent Changes (High Level)**
+### Prompt Framework
+This project uses a concise framework to ensure auditable actions:
+1.  **Plan:** The system prompt requires the model to provide a short "Chain-of-Thought" plan.
+2.  **Tool Use:** Actions are performed strictly by invoking the `run_linux_command` tool.
+3.  **Separation:** Reasoning and execution are kept separate for safety and traceability.
 
-- Added `sanitize_command` to automatically apply safe flags/timeouts for potentially hanging network or pager commands.
-- Implemented heuristic safety overrides that flag critical patterns (recursive removal, filesystem formatting, low-level `dd`, writes to system directories) and escalate risk to require explicit confirmation.
-- Switched the REPL to `prompt_toolkit` with `PromptSession` to provide command history and improved prompts.
-- Improved conversation memory trimming to avoid orphaned tool outputs when pruning long histories.
-- Added a `--debug` mode to expose model reasoning and raw subprocess stdout/stderr for troubleshooting.
-- Startup now waits for the model to load (spinner) to ensure the LLM context is allocated before use.
+---
 
-**Security & Usage Notes**
+## Development Status
 
-- The CLI is conservative: it prevents launching interactive TUI programs and prompts the user before any risky or elevated operations.
-- This script executes commands on the host — run it in a controlled environment and review commands before confirming execution.
+### Recent Updates
+* **Enhanced Safety:** Implemented heuristic overrides for high-risk filesystem operations.
+* **REPL Upgrade:** Switched to `prompt_toolkit` with `PromptSession` for better history navigation.
+* **Debug Mode:** Added `--debug` to expose model reasoning and subprocess stdout/stderr.
+* **Startup:** Added initialization spinners to ensure LLM context is ready before user input.
+* **Memory Management:** Improved conversation trimming to handle long histories without orphaning tool outputs.
 
-**Development / Next Steps**
-
-- Consider pinning versions in `requirements.txt` and adding unit tests for `sanitize_command` and safety heuristics.
-- Optionally containerize for parity with the larger `Stella-cli-docker` project.
-
-```
+### Next Steps
+* Pin versions in `requirements.txt`.
+* Add unit tests for `sanitize_command` and safety heuristics.
+* Optionally containerize for parity with the larger `Stella-cli-docker` project.
