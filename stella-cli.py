@@ -40,7 +40,7 @@ class UserAbort(Exception):
 # --- ARGUMENT PARSING ---
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
 parser.add_argument("--model", type=str, default="ministral-3:8b", help="Ollama model to use")
-parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output")
+parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output") #TODO: fix debug, it hgot lost
 parser.add_argument("--ctx", type=str, default="4096", help="Context length for the model")
 parser.add_argument("prompt", nargs="*", help="Direct prompt for non-interactive mode")
 args = parser.parse_args()
