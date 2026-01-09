@@ -79,21 +79,21 @@ class SpinnerHandler(BaseCallbackHandler):
 
 def truncate_output(text: str) -> str:
     """
-    Simple heuristic to prevent context overflow.
-    Assumes ~3 chars per token. Caps output at the context limit
-    to leave room for system prompts and history.
+    Smartly truncates output to keep the Head (beginning) and Tail (end).
+    Crucial for reading logs where the most important info is at the bottom.
     """
-    # Safe estimate: 3 chars per token
-    # We subtract a buffer (e.g. 1000 tokens) for history/system prompt
-    # forcing the tool output to fit within the remaining space.
-    # Here we just use a flat multiple of CTX_LENGTH.
-    char_limit = int(CTX_LENGTH * 3)
+    # approx 12k chars total (leaving room for reasoning)
+    MAX_CHARS = int(CTX_LENGTH * 3) 
     
-    if len(text) > char_limit:
-        cut_text = text[:char_limit]
-        return cut_text + f"\n... [OUTPUT TRUNCATED: Text too long ({len(text)} chars). Use filtering like grep/head.]"
+    if len(text) <= MAX_CHARS:
+        return text
     
-    return text
+    # Keep top half and bottom half
+    half = MAX_CHARS // 2
+    head = text[:half]
+    tail = text[-half:]
+    
+    return f"{head}\n\n... [TRUNCATED {len(text) - MAX_CHARS} CHARS] ...\n\n{tail}"
 
 def sanitize_command(cmd: str) -> str:
     """
