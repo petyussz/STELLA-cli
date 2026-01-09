@@ -1,11 +1,10 @@
-#!/mnt/archive/venvs/langchain/bin/python
-
 import subprocess
 import os
 import re
 import sys
 import argparse
 import shlex
+import json
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
@@ -16,6 +15,7 @@ from langchain.agents import create_agent
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.theme import Theme
+from rich.panel import Panel
 
 # --- PROMPT TOOLKIT (HISTORY & NAVIGATION) ---
 from prompt_toolkit import PromptSession
@@ -48,9 +48,9 @@ args = parser.parse_args()
 # --- CONFIGURATION ---
 MODEL = args.model
 MAX_HISTORY = 50
-CTX_LENGTH = args.ctx
+CTX_LENGTH = int(args.ctx)
 SUBPROCESS_TIMEOUT = 30
-HISTORY_FILE = os.path.expanduser("~/.stella_history") 
+SSH_CONN_TIMEOUT=10
 
 # --- SPINNER HANDLER ---
 class SpinnerHandler(BaseCallbackHandler):
@@ -63,12 +63,10 @@ class SpinnerHandler(BaseCallbackHandler):
         self.status = None
 
     def on_llm_start(self, serialized, prompts, **kwargs):
-        # Start spinner when LLM begins generating tokens
         self.status = self.console.status("[dim]Thinking...[/dim]", spinner="dots")
         self.status.start()
 
     def on_llm_end(self, response, **kwargs):
-        # Stop spinner immediately when generation ends (before tool runs)
         if self.status:
             self.status.stop()
 
@@ -77,9 +75,10 @@ class SpinnerHandler(BaseCallbackHandler):
             self.status.stop()
 
 # --- HELPER FUNCTIONS ---
+
 def sanitize_command(cmd: str) -> str:
     """
-    Sanitizes local shell commands to prevent hanging and improve safety.
+    Sanitizes local shell commands to prevent hanging (pager disabling, timeouts).
     """
     CONN_TIMEOUT = 20
     cmd = cmd.strip()
@@ -106,6 +105,60 @@ def sanitize_command(cmd: str) -> str:
 
     return cmd
 
+def analyze_risk(cmd: str) -> str:
+    """
+    Analyzes command safety using shlex tokenization instead of regex.
+    Returns 'critical' or 'low'.
+    """
+    try:
+        # shlex.split handles quotes correctly (e.g. 'rm -rf' inside a string is preserved)
+        tokens = shlex.split(cmd)
+    except ValueError:
+        # If parsing fails (e.g., unbalanced quotes), assume the worst for safety
+        console.print("[dim red]Warning: Command parsing failed (unbalanced quotes). Treating as Critical.[/dim red]")
+        return "critical"
+
+    # 1. Identify the 'verb' (command)
+    # We scan tokens. If we find a pipe '|', the next token is a new command.
+    commands_to_check = []
+    
+    if tokens:
+        commands_to_check.append(tokens[0])
+    
+    for i, token in enumerate(tokens):
+        if token == "|" and i + 1 < len(tokens):
+            commands_to_check.append(tokens[i+1])
+        # Handle sudo: if command is sudo, the NEXT word is the actual verb
+        if token == "sudo" and i + 1 < len(tokens):
+            commands_to_check.append(tokens[i+1])
+
+    # 2. Define Critical Binaries
+    CRITICAL_BINARIES = {
+        "mkfs", "dd", "shutdown", "reboot", "init", 
+        "chmod", "chown", "wget", "curl", "mv", "cp"
+    }
+
+    # 3. Check for specific dangerous patterns
+    for cmd_verb in commands_to_check:
+        if cmd_verb in CRITICAL_BINARIES:
+            return "critical"
+        
+        # rm is only critical if recursive (-r/-R)
+        if cmd_verb == "rm":
+            if any(flag in tokens for flag in ["-r", "-R", "-rf", "-fr"]):
+                return "critical"
+
+    # 4. Check for dangerous redirection (writing to system dirs)
+    # This is a naive check: if we see > pointing to /etc, /boot, etc.
+    if ">" in tokens:
+        idx = tokens.index(">")
+        if idx + 1 < len(tokens):
+            target = tokens[idx+1]
+            if target.startswith(("/etc", "/boot", "/usr", "/var")):
+                return "critical"
+
+    return "low"
+
 def wait_for_model_load(llm_instance):
     with console.status(f"[dim]Loading {llm_instance.model}...[/dim]", spinner="dots"):
         try:
@@ -117,9 +170,9 @@ def wait_for_model_load(llm_instance):
 # --- TOOLS DEFINITION ---
 
 @tool
-def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
+def run_linux_command(cmd: str, sudo: bool = False) -> str:
     """
-    Executes a LOCAL Linux shell command on the host running Stella.
+    Executes a LOCAL Linux shell command.
     """
     cmd = cmd.strip()
 
@@ -137,17 +190,11 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     # --- 2. Sanitize ---
     cmd = sanitize_command(cmd)
 
-    # --- 3. Safety Analysis ---
+    # --- 3. Safety Analysis (SHLEX) ---
     actual_sudo = sudo or "sudo" in cmd
-    
-    CRITICAL_PATTERNS = [
-        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*", r"\bmkfs", r"\bdd\b", 
-        r">\s*/etc/", r">\s*/boot/", r"\bchmod\s+777", 
-        r"\bchown\b", r"\breboot\b", r"\bshutdown\b"
-    ]
+    risk = analyze_risk(cmd)
 
-    if any(re.search(pattern, cmd) for pattern in CRITICAL_PATTERNS):
-        risk = "critical"
+    if risk == "critical":
         console.print("[bold red]CRITICAL SECURITY WARNING[/bold red]")
 
     # --- TEXT ONLY EXECUTION NOTIFICATION ---
@@ -155,7 +202,7 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     console.print(f"\n[bold green]>[/bold green] {sudo_label}[command]{cmd}[/command]")
     
     # --- CONFIRMATION ---
-    if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
+    if risk == "critical" or actual_sudo:
         if not sys.stdin.isatty():
              raise UserAbort("High risk command denied (Non-interactive mode).")
         
@@ -189,12 +236,6 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
             result = subprocess.run(
                 cmd, shell=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT
             )
-            
-            if args.debug:
-                console.print(f"[dim]--- STDOUT ---[/dim]\n{result.stdout}")
-                if result.stderr:
-                    console.print(f"[dim]--- STDERR ---[/dim]\n{result.stderr}")
-
             output = result.stdout + result.stderr
             return output.strip() or "Success (No Output)"
 
@@ -204,25 +245,18 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
             return f"Error: {e}"
 
 @tool
-def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool = False, risk: str = "low") -> str:
+def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool = False) -> str:
     """
     Executes a command on a remote server via SSH. 
-    NOTE: Each command is a new session. Directory changes (cd) do not persist.
-    Chain commands if needed: 'cd /var/log && ls'.
+    NOTE: Stateless. Chain commands: 'cd /opt/app && ./restart.sh'.
     """
     command = command.strip()
     
-    # --- 1. Risk & Sudo Analysis ---
+    # --- 1. Risk & Sudo Analysis (SHLEX) ---
     actual_sudo = sudo or "sudo" in command
-    
-    CRITICAL_PATTERNS = [
-        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*", r"\bmkfs", r"\bdd\b", 
-        r">\s*/etc/", r">\s*/boot/", r"\bchmod\s+777", 
-        r"\bchown\b", r"\breboot\b", r"\bshutdown\b"
-    ]
+    risk = analyze_risk(command)
 
-    if any(re.search(pattern, command) for pattern in CRITICAL_PATTERNS):
-        risk = "critical"
+    if risk == "critical":
         console.print("[bold red]CRITICAL SECURITY WARNING[/bold red]")
 
     # --- 2. Sudo Flag Injection ---
@@ -233,7 +267,7 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
     console.print(f"\n[bold cyan]>[/bold cyan] [dim]Remote ({user}@{host}):[/dim] [command]{command}[/command]")
 
     # --- 4. User Confirmation ---
-    if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
+    if risk == "critical" or actual_sudo:
         if not sys.stdin.isatty():
              raise UserAbort("High risk command denied (Non-interactive mode).")
         
@@ -242,25 +276,18 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
             raise UserAbort("Action denied by user.")
 
     # --- 5. Construct SSH Command ---
-    ssh_opts = "-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+    ssh_opts = f"-o BatchMode=yes -o ConnectTimeout={SSH_CONN_TIMEOUT} -o StrictHostKeyChecking=accept-new"
     full_ssh_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(command)}"
 
     # --- 6. Execution ---
     with console.status(f"[dim]Connecting to {host}...[/dim]", spinner="earth"):
         try:
             result = subprocess.run(
-                full_ssh_cmd, 
-                shell=True, 
-                text=True, 
-                capture_output=True,
-                timeout=30 
+                full_ssh_cmd, shell=True, text=True, capture_output=True, timeout=30 
             )
-            
             output = result.stdout + result.stderr
-            
             if result.returncode == 255:
                 return f"SSH Connection Failed: {output.strip()}"
-                
             return output.strip() or "Success (No Output)"
 
         except subprocess.TimeoutExpired:
@@ -271,22 +298,14 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
 @tool
 def write_file(file_path: str, content: str) -> str:
     """
-    Writes text content to a file on the LOCAL machine. 
-    Use this to create helper scripts or save output.
-    Overwrites existing files.
+    Writes text content to a file on the LOCAL machine.
+    Use this to create helper scripts (Python/Bash) or save output.
     """
     try:
-        # --- 1. Path Safety ---
-        # Expand user explicitly (~/ becomes /home/user/)
         target_path = os.path.expanduser(file_path)
-        
-        # Prevent writing outside of safe areas if you want strict safety
-        # For now, we just block obvious system paths
         if target_path.startswith(("/etc", "/boot", "/usr", "/var/lib")):
-            return "Error: Writing to system directories is forbidden for safety."
+            return "Error: Writing to system directories is forbidden."
         
-        # --- 2. Write the file ---
-        # We use 'w' mode which creates or overwrites
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(content)
             
@@ -312,9 +331,10 @@ You are STELLA.
 3. Summarize findings.
 4. Use Markdown.
 
-CRITICAL INSTRUCTION: 
-- When calling 'run_linux_command', do NOT escape special characters. Pass the raw command string.
-- Remote commands (run_remote_command) are STATELESS. 'cd' only works for the duration of that single command string. To run commands in a folder remotely, chain them: "cd /opt/app && ./restart.sh".
+CRITICAL INSTRUCTIONS: 
+- Remote commands are STATELESS. Chain them: "cd /opt/app && ./restart.sh".
+- For complex logic (JSON parsing, loops), use 'write_file' to create a Python script, then run it.
+- Do NOT use 'echo' or 'awk' to generate JSON strings in the shell (escaping issues).
 """
 )
 
@@ -339,19 +359,13 @@ else:
 if not sys.stdin.isatty():
     stdin_content = sys.stdin.read().strip()
     cli_prompt = " ".join(args.prompt).strip()
+    full_prompt = f"Context:\n{stdin_content}\n\nInstruction: {cli_prompt}" if cli_prompt else f"Analyze:\n{stdin_content}"
     
-    full_prompt = ""
-    if cli_prompt:
-        full_prompt = f"Context:\n{stdin_content}\n\nInstruction: {cli_prompt}"
-    else:
-        full_prompt = f"Analyze the following output:\n{stdin_content}"
-
-    messages = [
-        SystemMessage(content="You are a helpful Linux assistant. Provide clear, concise analysis in Markdown."),
-        HumanMessage(content=full_prompt)
-    ]
     try:
-        response = llm.invoke(messages)
+        response = llm.invoke([
+            SystemMessage(content="You are a helpful Linux assistant. Provide clear analysis in Markdown."),
+            HumanMessage(content=full_prompt)
+        ])
         console.print(Markdown(response.content))
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
@@ -374,7 +388,7 @@ if args.prompt:
         console.print(f"[bold red]Error:[/bold red] {e}")
     sys.exit(0)
 
-# 3. Interactive Mode -> FULL SESSION WITH HISTORY
+# 3. Interactive Mode -> FULL SESSION
 console.print(f"[bold green]STELLA ({MODEL})[/bold green] [dim]Ready.[/dim]")
 
 session = PromptSession(history=InMemoryHistory())
@@ -398,7 +412,6 @@ while True:
 
         messages.append(HumanMessage(content=user_input))
         
-        # Invoke agent with the SpinnerHandler callback
         response = agent.invoke(
             {"messages": messages},
             config={"callbacks": [spinner_handler]}
@@ -415,7 +428,6 @@ while True:
         console.print("\n[bold red]Quit.[/bold red]")
         break
     except UserAbort:
-        # Catch the hard stop, print message, and loop back to input
         console.print("\n[bold yellow]Operation aborted by user.[/bold yellow]")
     except EOFError:
         break
