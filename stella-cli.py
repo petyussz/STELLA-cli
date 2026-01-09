@@ -1,8 +1,11 @@
+#!/mnt/archive/venvs/langchain/bin/python
+
 import subprocess
 import os
 import re
 import sys
 import argparse
+import shlex
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
@@ -38,17 +41,18 @@ class UserAbort(Exception):
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
 parser.add_argument("--model", type=str, default="ministral-3:8b", help="Ollama model to use")
 parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output")
+parser.add_argument("--ctx", type=str, default="4096", help="Context length for the model")
 parser.add_argument("prompt", nargs="*", help="Direct prompt for non-interactive mode")
 args = parser.parse_args()
 
 # --- CONFIGURATION ---
 MODEL = args.model
 MAX_HISTORY = 50
-CTX_LENGTH = 4096
+CTX_LENGTH = args.ctx
 SUBPROCESS_TIMEOUT = 30
 HISTORY_FILE = os.path.expanduser("~/.stella_history") 
 
-# --- SPINNER HANDLER (FIX FOR INPUT CONFLICT) ---
+# --- SPINNER HANDLER ---
 class SpinnerHandler(BaseCallbackHandler):
     """
     Handles the spinner automatically based on LLM state.
@@ -74,6 +78,9 @@ class SpinnerHandler(BaseCallbackHandler):
 
 # --- HELPER FUNCTIONS ---
 def sanitize_command(cmd: str) -> str:
+    """
+    Sanitizes local shell commands to prevent hanging and improve safety.
+    """
     CONN_TIMEOUT = 20
     cmd = cmd.strip()
 
@@ -87,17 +94,12 @@ def sanitize_command(cmd: str) -> str:
         if not re.search(r"--no-pager", cmd):
             cmd = re.sub(r"\bjournalctl\b", "journalctl --no-pager", cmd, count=1)
 
-    # Rule 3: SSH
-    if cmd.startswith("ssh "): 
-        if "-o ConnectTimeout=" not in cmd:
-            cmd = cmd.replace("ssh ", f"ssh -o ConnectTimeout={CONN_TIMEOUT} ", 1)
-
-    # Rule 4: Curl
+    # Rule 3: Curl
     if re.search(r"\bcurl\b", cmd):
         if not re.search(r"(--max-time|-m)\s+\d+", cmd):
             cmd = re.sub(r"\bcurl\b", f"curl --max-time {CONN_TIMEOUT}", cmd, count=1)
 
-    # Rule 5: Wget
+    # Rule 4: Wget
     if re.search(r"\bwget\b", cmd):
         if not re.search(r"(--timeout|-T)[=\s]+\d+", cmd):
             cmd = re.sub(r"\bwget\b", f"wget --timeout={CONN_TIMEOUT}", cmd, count=1)
@@ -112,11 +114,12 @@ def wait_for_model_load(llm_instance):
             console.print(f"[bold red]Error loading model: {e}[/bold red]")
             sys.exit(1)
 
-# --- TOOL DEFINITION ---
+# --- TOOLS DEFINITION ---
+
 @tool
 def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     """
-    Executes a Linux shell command.
+    Executes a LOCAL Linux shell command on the host running Stella.
     """
     cmd = cmd.strip()
 
@@ -126,7 +129,7 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
             target_dir = cmd[3:].strip()
             target_dir = os.path.expanduser(target_dir)
             os.chdir(target_dir)
-            console.print(f"[dim]📂 CWD: {os.getcwd()}[/dim]")
+            console.print(f"[dim]ðŸ“‚ CWD: {os.getcwd()}[/dim]")
             return f"Success: Changed directory to {os.getcwd()}"
         except Exception as e:
             return f"Error changing directory: {e}"
@@ -154,30 +157,25 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
     # --- CONFIRMATION ---
     if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
         if not sys.stdin.isatty():
-             # In non-interactive mode, we can't ask, so we must abort if risky
              raise UserAbort("High risk command denied (Non-interactive mode).")
         
-        # NOTE: Because the spinner is stopped via the Handler, input() works here now.
         confirm = input(f"\033[33mExecute?\033[0m (y/n): ")
         if confirm.lower() not in ["y", "yes"]:
-            # --- CHANGE: RAISE EXCEPTION INSTEAD OF RETURNING STRING ---
             raise UserAbort("Action denied by user.")
 
     forbidden = ["nano", "vim", "vi", "htop", "less", "more", "watch", "nvtop", "ptop", "telnet"] 
     if any(f" {t}" in cmd for t in forbidden) or cmd.startswith(tuple(forbidden)):
-        raise UserAbort("Error: Interactive tools (vim, top, etc) are blocked.")
+        return "Error: Interactive tools (vim, top, etc) are blocked."
 
     if sudo and not cmd.startswith("sudo") and "|" not in cmd:
         cmd = f"sudo {cmd}"
 
     # --- SUDO AUTHENTICATION HANDLER ---
     if actual_sudo:
-        # check if we already have sudo rights without prompt
         sudo_check = subprocess.run("sudo -n true", shell=True, capture_output=True)
         if sudo_check.returncode != 0:
             console.print("[dim yellow]Sudo authentication required...[/dim yellow]")
             try:
-                # Run sudo -v explicitly connecting streams to allow password input
                 auth_result = subprocess.run("sudo -v", shell=True)
                 if auth_result.returncode != 0:
                     return "Error: Sudo authentication failed or cancelled."
@@ -205,6 +203,99 @@ def run_linux_command(cmd: str, sudo: bool = False, risk: str = "low") -> str:
         except Exception as e:
             return f"Error: {e}"
 
+@tool
+def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool = False, risk: str = "low") -> str:
+    """
+    Executes a command on a remote server via SSH. 
+    NOTE: Each command is a new session. Directory changes (cd) do not persist.
+    Chain commands if needed: 'cd /var/log && ls'.
+    """
+    command = command.strip()
+    
+    # --- 1. Risk & Sudo Analysis ---
+    actual_sudo = sudo or "sudo" in command
+    
+    CRITICAL_PATTERNS = [
+        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*", r"\bmkfs", r"\bdd\b", 
+        r">\s*/etc/", r">\s*/boot/", r"\bchmod\s+777", 
+        r"\bchown\b", r"\breboot\b", r"\bshutdown\b"
+    ]
+
+    if any(re.search(pattern, command) for pattern in CRITICAL_PATTERNS):
+        risk = "critical"
+        console.print("[bold red]CRITICAL SECURITY WARNING[/bold red]")
+
+    # --- 2. Sudo Flag Injection ---
+    if sudo and not command.startswith("sudo"):
+        command = f"sudo -n {command}" 
+
+    # --- 3. UI Feedback ---
+    console.print(f"\n[bold cyan]>[/bold cyan] [dim]Remote ({user}@{host}):[/dim] [command]{command}[/command]")
+
+    # --- 4. User Confirmation ---
+    if risk.lower() in ["medium", "high", "critical"] or actual_sudo:
+        if not sys.stdin.isatty():
+             raise UserAbort("High risk command denied (Non-interactive mode).")
+        
+        confirm = input(f"\033[33mExecute Remote?\033[0m (y/n): ")
+        if confirm.lower() not in ["y", "yes"]:
+            raise UserAbort("Action denied by user.")
+
+    # --- 5. Construct SSH Command ---
+    ssh_opts = "-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+    full_ssh_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(command)}"
+
+    # --- 6. Execution ---
+    with console.status(f"[dim]Connecting to {host}...[/dim]", spinner="earth"):
+        try:
+            result = subprocess.run(
+                full_ssh_cmd, 
+                shell=True, 
+                text=True, 
+                capture_output=True,
+                timeout=30 
+            )
+            
+            output = result.stdout + result.stderr
+            
+            if result.returncode == 255:
+                return f"SSH Connection Failed: {output.strip()}"
+                
+            return output.strip() or "Success (No Output)"
+
+        except subprocess.TimeoutExpired:
+            return "Error: Connection timed out."
+        except Exception as e:
+            return f"Error: {e}"
+
+@tool
+def write_file(file_path: str, content: str) -> str:
+    """
+    Writes text content to a file on the LOCAL machine. 
+    Use this to create helper scripts or save output.
+    Overwrites existing files.
+    """
+    try:
+        # --- 1. Path Safety ---
+        # Expand user explicitly (~/ becomes /home/user/)
+        target_path = os.path.expanduser(file_path)
+        
+        # Prevent writing outside of safe areas if you want strict safety
+        # For now, we just block obvious system paths
+        if target_path.startswith(("/etc", "/boot", "/usr", "/var/lib")):
+            return "Error: Writing to system directories is forbidden for safety."
+        
+        # --- 2. Write the file ---
+        # We use 'w' mode which creates or overwrites
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(content)
+            
+        console.print(f"[bold green]File Written:[/bold green] {target_path}")
+        return f"Success: File wrote to {target_path}"
+
+    except Exception as e:
+        return f"Error writing file: {e}"
+
 # --- LLM SETUP ---
 llm = ChatOllama(
     model=MODEL,
@@ -217,19 +308,19 @@ system_prompt_agent = SystemMessage(
     content="""
 You are STELLA.
 1. Plan briefly.
-2. Execute with 'run_linux_command'.
+2. Execute locally ('run_linux_command', 'write_file') or remotely ('run_remote_command').
 3. Summarize findings.
 4. Use Markdown.
 
-CRITICAL INSTRUCTION: When calling 'run_linux_command', 
-do NOT escape special characters like pipes (|), redirection (>), or quotes. 
-Pass the raw command string exactly as it would be typed in a shell.
+CRITICAL INSTRUCTION: 
+- When calling 'run_linux_command', do NOT escape special characters. Pass the raw command string.
+- Remote commands (run_remote_command) are STATELESS. 'cd' only works for the duration of that single command string. To run commands in a folder remotely, chain them: "cd /opt/app && ./restart.sh".
 """
 )
 
 agent = create_agent(
     model=llm,
-    tools=[run_linux_command],
+    tools=[run_linux_command, run_remote_command, write_file],
     system_prompt=system_prompt_agent,
 )
 

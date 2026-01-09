@@ -9,10 +9,10 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 ## Key Features
 
 * **Local LLM Integration:** Powered by Ollama (`langchain_ollama`) for privacy and speed.
-* **Safe Command Execution:** Includes sanitization, heuristic risk checks, and blocked interactive programs.
+* **Three Tools:** `run_linux_command`, `run_remote_command`, and `write_file` for flexible task execution.
 * **Three Operation Modes:** Interactive REPL, Single-shot CLI, and Piped Input analysis.
-* **Rich Terminal UI:** Features Markdown rendering, themed output, and spinners.
-* **History & Navigation:** Robust command history support via `prompt_toolkit`.
+* **Smart Safety:** Heuristic risk checks, command sanitization, confirmation prompts, and blocked interactive programs.
+* **Rich Terminal UI:** Markdown rendering, themed output, spinners, and history navigation via `prompt_toolkit`.
 
 ---
 
@@ -55,7 +55,23 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 ### Command Line Flags
 
 * `--model`: Specify the Ollama model to use (default: `ministral-3:8b`).
-* `--debug`: Enable debug mode to view model reasoning, raw subprocess output, and internal logs.
+* `--ctx`: Set context window size in tokens (default: `4096`).
+* `--debug`: View model reasoning, subprocess output, and internal logs.
+
+### Remote Execution
+
+STELLA can execute commands on remote servers via SSH. The model can transparently choose between local and remote execution based on your instructions:
+
+```bash
+python stella-cli.py "check disk usage on prod-server-01"
+```
+
+The agent will use the `run_remote_command` tool with:
+* **Host & User:** Specify in your prompt (e.g., "on admin@prod-server-01")
+* **Sudo:** Automatically escalated if needed (requires SSH key-based auth or cached credentials)
+* **Timeouts:** SSH connections timeout after 10 seconds to prevent hanging
+
+**Requirements:** SSH keys configured for passwordless access to target hosts.
 
 ---
 
@@ -64,27 +80,31 @@ This repository is a smaller sibling of the larger [Stella-cli-docker](https://g
 The CLI is designed to be conservative. It executes commands directly on the host, so strictly controlled environments and user review are essential.
 
 ### Safety Mechanisms
-* **Heuristic Risk Checks:** The system flags critical patterns (e.g., recursive `rm`, `mkfs`, `dd`, writes to `/etc`) and escalates them to require explicit confirmation.
-* **Command Sanitization:** Automatically applies timeouts and safe flags to potentially hanging network commands (e.g., `curl`, `wget`) or paging tools (`journalctl`).
-* **Blocked Programs:** Interactive TUI programs (e.g., `vim`, `htop`, `nano`) are blocked to prevent the REPL from hanging.
-* **Elevation Control:** Any action requiring `sudo` or deemed Medium/High/Critical risk triggers a user confirmation prompt.
+* **Risk Escalation:** Critical patterns (`rm -r`, `mkfs`, `dd`, writes to `/etc`, etc.) require explicit user confirmation.
+* **Command Sanitization:** Auto-applies timeouts and safe flags:
+  - `curl` / `wget`: 20-second max connection time
+  - `systemctl` / `journalctl`: Adds `--no-pager` to prevent hanging
+* **Blocked Programs:** `vim`, `nano`, `htop`, `less`, `more`, `watch`, and other interactive TUIs blocked.
+* **Sudo Handling:** Prompts for authentication when needed; caches credentials for session.
+* **Path Safety:** `write_file` blocks writes to `/etc`, `/boot`, `/usr`, `/var/lib`.
+* **Elevation Control:** Any `sudo` or High/Critical risk action requires confirmation (interactive mode only).
 
 ### Prompt Framework
-This project uses a concise framework to ensure auditable actions:
-1.  **Plan:** The system prompt requires the model to provide a short "Chain-of-Thought" plan.
-2.  **Tool Use:** Actions are performed strictly by invoking the `run_linux_command` tool.
-3.  **Separation:** Reasoning and execution are kept separate for safety and traceability.
+The system uses a structured execution model:
+1. **Planning:** Model produces a brief Chain-of-Thought plan.
+2. **Tool Invocation:** Actions executed via tools (`run_linux_command`, `run_remote_command`, `write_file`).
+3. **Transparency:** All tool calls and outcomes are logged for audit and review.
 
 ---
 
 ## Development Status
 
 ### Recent Updates
-* **Enhanced Safety:** Implemented heuristic overrides for high-risk filesystem operations.
-* **REPL Upgrade:** Switched to `prompt_toolkit` with `PromptSession` for better history navigation.
-* **Debug Mode:** Added `--debug` to expose model reasoning and subprocess stdout/stderr.
-* **Startup:** Added initialization spinners to ensure LLM context is ready before user input.
-* **Memory Management:** Improved conversation trimming to handle long histories without orphaning tool outputs.
+* **Three Tools:** Added `write_file` for creating/saving files; enhanced `run_remote_command` with better SSH control.
+* **Enhanced Safety:** Heuristic risk detection, sanitization rules, blocked interactive programs list.
+* **Spinners & Status:** Real-time feedback during LLM thinking and command execution.
+* **Context Window Control:** Added `--ctx` flag for flexible model context management.
+* **History & REPL:** `prompt_toolkit` integration for better navigation and session persistence.
 
 ### Next Steps
 * Pin versions in `requirements.txt`.
