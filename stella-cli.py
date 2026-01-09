@@ -1,3 +1,5 @@
+#!/mnt/archive/venvs/langchain/bin/python
+
 import subprocess
 import os
 import re
@@ -51,6 +53,7 @@ MAX_HISTORY = 50
 CTX_LENGTH = int(args.ctx)
 SUBPROCESS_TIMEOUT = 30
 SSH_CONN_TIMEOUT=10
+WGET_CURL_TIMEOUT=60
 
 # --- SPINNER HANDLER ---
 class SpinnerHandler(BaseCallbackHandler):
@@ -80,7 +83,7 @@ def sanitize_command(cmd: str) -> str:
     """
     Sanitizes local shell commands to prevent hanging (pager disabling, timeouts).
     """
-    CONN_TIMEOUT = 20
+    CONN_TIMEOUT = WGET_CURL_TIMEOUT
     cmd = cmd.strip()
 
     # Rule 1: Systemctl
