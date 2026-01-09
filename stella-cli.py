@@ -1,3 +1,5 @@
+#!/mnt/archive/venvs/langchain/bin/python
+
 import subprocess
 import os
 import re
@@ -76,6 +78,24 @@ class SpinnerHandler(BaseCallbackHandler):
             self.status.stop()
 
 # --- HELPER FUNCTIONS ---
+
+def truncate_output(text: str) -> str:
+    """
+    Simple heuristic to prevent context overflow.
+    Assumes ~3 chars per token. Caps output at the context limit
+    to leave room for system prompts and history.
+    """
+    # Safe estimate: 3 chars per token
+    # We subtract a buffer (e.g. 1000 tokens) for history/system prompt
+    # forcing the tool output to fit within the remaining space.
+    # Here we just use a flat multiple of CTX_LENGTH.
+    char_limit = int(CTX_LENGTH * 3)
+    
+    if len(text) > char_limit:
+        cut_text = text[:char_limit]
+        return cut_text + f"\n... [OUTPUT TRUNCATED: Text too long ({len(text)} chars). Use filtering like grep/head.]"
+    
+    return text
 
 def sanitize_command(cmd: str) -> str:
     """
@@ -183,7 +203,7 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
             target_dir = cmd[3:].strip()
             target_dir = os.path.expanduser(target_dir)
             os.chdir(target_dir)
-            console.print(f"[dim]ðŸ“‚ CWD: {os.getcwd()}[/dim]")
+            console.print(f"[dim]📂 CWD: {os.getcwd()}[/dim]")
             return f"Success: Changed directory to {os.getcwd()}"
         except Exception as e:
             return f"Error changing directory: {e}"
@@ -238,7 +258,7 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
                 cmd, shell=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT
             )
             output = result.stdout + result.stderr
-            return output.strip() or "Success (No Output)"
+            return truncate_output(output.strip() or "Success (No Output)")
 
         except subprocess.TimeoutExpired:
             return "Error: Command timed out."
@@ -289,7 +309,7 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
             output = result.stdout + result.stderr
             if result.returncode == 255:
                 return f"SSH Connection Failed: {output.strip()}"
-            return output.strip() or "Success (No Output)"
+            return truncate_output(output.strip() or "Success (No Output)")
 
         except subprocess.TimeoutExpired:
             return "Error: Connection timed out."
@@ -316,6 +336,31 @@ def write_file(file_path: str, content: str) -> str:
     except Exception as e:
         return f"Error writing file: {e}"
 
+@tool
+def read_file(file_path: str) -> str:
+    """
+    Reads the content of a file from the LOCAL machine.
+    Useful for inspecting config files, logs, or scripts before editing them.
+    """
+    try:
+        target_path = os.path.expanduser(file_path)
+        if not os.path.exists(target_path):
+            return f"Error: File not found: {target_path}"
+        
+        # We increase the hard limit to 5MB, allowing truncate_output to handle
+        # the context protection, while preventing massive memory spikes.
+        if os.path.getsize(target_path) > 5_000_000:
+            return "Error: File is too large (>5MB) to read directly. Use 'grep' or 'head' via run_linux_command instead."
+
+        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+            
+        console.print(f"[dim]📄 Read file: {target_path}[/dim]")
+        return truncate_output(content)
+
+    except Exception as e:
+        return f"Error reading file: {e}"
+
 # --- LLM SETUP ---
 llm = ChatOllama(
     model=MODEL,
@@ -328,7 +373,7 @@ system_prompt_agent = SystemMessage(
     content="""
 You are STELLA.
 1. Plan briefly.
-2. Execute locally ('run_linux_command', 'write_file') or remotely ('run_remote_command').
+2. Execute locally ('run_linux_command', 'read_file', 'write_file') or remotely ('run_remote_command').
 3. Summarize findings.
 4. Use Markdown.
 
@@ -341,7 +386,7 @@ CRITICAL INSTRUCTIONS:
 
 agent = create_agent(
     model=llm,
-    tools=[run_linux_command, run_remote_command, write_file],
+    tools=[run_linux_command, run_remote_command, write_file, read_file],
     system_prompt=system_prompt_agent,
 )
 
@@ -360,6 +405,8 @@ else:
 if not sys.stdin.isatty():
     stdin_content = sys.stdin.read().strip()
     cli_prompt = " ".join(args.prompt).strip()
+    # Truncate input as well to be safe
+    stdin_content = truncate_output(stdin_content)
     full_prompt = f"Context:\n{stdin_content}\n\nInstruction: {cli_prompt}" if cli_prompt else f"Analyze:\n{stdin_content}"
     
     try:
