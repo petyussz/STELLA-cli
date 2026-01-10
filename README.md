@@ -105,7 +105,7 @@ The system uses a structured execution model:
 ### Recent Updates
 * **Linux Environment Hardening:** Subprocess execution now injects safe environment variables (`PAGER=cat`, `TERM=dumb`, etc.) at the OS level rather than relying solely on command-line sanitization. This is more robust and simpler to maintain.
 * **Enhanced Command Sanitization:** Auto-applies `sudo -E`, `systemctl --full`, and network timeouts as auxiliary protections.
-* **Three Tools:** `run_linux_command`, `run_remote_command`, and `write_file` for flexible task execution.
-* **Heuristic Risk Detection:** Analyzes commands for critical patterns and blocks dangerous operations until user confirms.
+* **Four Tools:** `run_linux_command`, `run_remote_command`, `read_file`and `write_file` for flexible task execution.
+* **Heuristic Risk Detection:** Analyzes commands for critical patterns and blocks potentially dangerous operations until user confirms.
 * **Spinners & Status:** Real-time feedback during LLM thinking and command execution.
 * **History & REPL:** `prompt_toolkit` integration for command history and improved navigation.
