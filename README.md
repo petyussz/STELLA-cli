@@ -1,13 +1,13 @@
 ﻿# STELLA (Simple Terminal LLM Agent) 
 
-A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is designed to run smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands with safety and transparency. 
+A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is designed to run smaller models locally (via a local Ollama instance) to perform system administration tasks and execute controlled shell commands with safety and transparency. 
 
 ---
 
 ## Key Features
 
 * **Local LLM Integration:** Powered by Ollama (`langchain_ollama`) for privacy and speed.
-* **Three Tools:** `run_linux_command`, `run_remote_command`, and `write_file` for flexible task execution.
+* **Four Tools:** `run_linux_command`, `run_remote_command`, `read_file` and `write_file` for flexible task execution.
 * **Three Operation Modes:** Interactive REPL, Single-shot CLI, and Piped Input analysis.
 * **Smart Safety:** Heuristic risk checks, command sanitization, confirmation prompts, and blocked interactive programs.
 * **Rich Terminal UI:** Markdown rendering, themed output, spinners, and history navigation via `prompt_toolkit`.
