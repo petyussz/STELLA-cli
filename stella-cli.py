@@ -1,5 +1,3 @@
-#!/mnt/archive/venvs/langchain/bin/python
-
 import subprocess
 import os
 import re
@@ -255,7 +253,8 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
     safe_env = os.environ.copy()
     safe_env["PAGER"] = "cat"
     safe_env["SYSTEMD_PAGER"] = "cat"
-    safe_env["TERM"] = "dumb"  # Prevents some programs from using advanced terminal features
+    safe_env["TERM"] = "dumb"
+    safe_env["PYTHONUNBUFFERED"] = "1"
 
     with console.status("[dim]Running...[/dim]", spinner="dots"):
         try:
@@ -310,7 +309,7 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
     # Since we can't pass `env=` to SSH easily, we export them in the command string.
     # We use 'export' so they persist if the user chains commands (cmd1 && cmd2).
     # NOTE: sudo -E (added in sanitize step) ensures these survive the root switch.
-    cmd_with_env = f"export PAGER=cat; export SYSTEMD_PAGER=cat; {command}"
+    cmd_with_env = f"export PAGER=cat export SYSTEMD_PAGER=cat TERM=dumb; {command}"
 
     # --- 5. SSH Execution ---
     ssh_opts = f"-o BatchMode=yes -o ConnectTimeout={SSH_CONN_TIMEOUT} -o StrictHostKeyChecking=accept-new"

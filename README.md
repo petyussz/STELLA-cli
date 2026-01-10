@@ -81,9 +81,14 @@ The CLI is designed to be conservative. It executes commands directly on the hos
 
 ### Safety Mechanisms
 * **Risk Escalation:** Critical patterns (`rm -r`, `mkfs`, `dd`, writes to `/etc`, etc.) require explicit user confirmation.
-* **Command Sanitization:** Auto-applies timeouts and safe flags:
-  - `curl` / `wget`: 20-second max connection time
-  - `systemctl` / `journalctl`: Adds `--no-pager` to prevent hanging
+* **Environment Variable Hardening:** All commands execute with safe Linux environment variables:
+  - `PAGER=cat` and `SYSTEMD_PAGER=cat`: Prevents pagers from hanging waiting for input
+  - `TERM=dumb`: Forces non-interactive output mode
+  - `PYTHONUNBUFFERED=1`: Ensures unbuffered output for real-time feedback
+* **Command Sanitization:** Auto-applies protective flags:
+  - `curl` / `wget`: 60-second timeout on network operations
+  - `systemctl`: Adds `--full (-l)` to prevent line truncation
+  - `sudo`: Automatically enforces `-E` flag to preserve safe environment variables through privilege escalation
 * **Blocked Programs:** `vim`, `nano`, `htop`, `less`, `more`, `watch`, and other interactive TUIs blocked.
 * **Sudo Handling:** Prompts for authentication when needed; caches credentials for session.
 * **Path Safety:** `write_file` blocks writes to `/etc`, `/boot`, `/usr`, `/var/lib`.
@@ -100,11 +105,12 @@ The system uses a structured execution model:
 ## Development Status
 
 ### Recent Updates
-* **Three Tools:** Added `write_file` for creating/saving files; enhanced `run_remote_command` with better SSH control.
-* **Enhanced Safety:** Heuristic risk detection, sanitization rules, blocked interactive programs list.
+* **Linux Environment Hardening:** Subprocess execution now injects safe environment variables (`PAGER=cat`, `TERM=dumb`, etc.) at the OS level rather than relying solely on command-line sanitization. This is more robust and simpler to maintain.
+* **Enhanced Command Sanitization:** Auto-applies `sudo -E`, `systemctl --full`, and network timeouts as auxiliary protections.
+* **Three Tools:** `run_linux_command`, `run_remote_command`, and `write_file` for flexible task execution.
+* **Heuristic Risk Detection:** Analyzes commands for critical patterns and blocks dangerous operations until user confirms.
 * **Spinners & Status:** Real-time feedback during LLM thinking and command execution.
-* **Context Window Control:** Added `--ctx` flag for flexible model context management.
-* **History & REPL:** `prompt_toolkit` integration for better navigation and session persistence.
+* **History & REPL:** `prompt_toolkit` integration for command history and improved navigation.
 
 ### Next Steps
 * Pin versions in `requirements.txt`.
