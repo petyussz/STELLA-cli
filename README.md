@@ -1,8 +1,6 @@
-﻿# Mini STELLA CLI
+﻿# STELLA CLI
 
-A compact, local version of the STELLA Linux agent. This lightweight script (`stella-cli.py`) is designed to run smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands.
-
-This repository is a smaller sibling of the larger [Stella-cli-docker](https://github.com/petyussz/Stella-cli-docker) project. While the Docker version targets bigger models in isolated environments with remote host management, **Mini STELLA CLI** focuses on a minimal, easy-to-run experience for development and experimentation.
+A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is designed to run smaller models locally (or via a local Ollama instance) to perform system administration tasks and execute controlled shell commands with safety and transparency.
 
 ---
 
@@ -115,4 +113,4 @@ The system uses a structured execution model:
 ### Next Steps
 * Pin versions in `requirements.txt`.
 * Add unit tests for `sanitize_command` and safety heuristics.
-* Optionally containerize for parity with the larger `Stella-cli-docker` project.
+* Expand remote host discovery and multi-host orchestration capabilities.
