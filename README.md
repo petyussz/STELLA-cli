@@ -65,7 +65,7 @@ python stella-cli.py "check disk usage on prod-server-01"
 ```
 
 The agent will use the `run_remote_command` tool with:
-* **Host & User:** Specify in your prompt (e.g., "on admin@prod-server-01")
+* **Host & User:** Specify in your prompt (e.g., "on admin@prod-server-01"), or reference hosts from a JSON inventory file at `/home/administrator/managed_hosts.json`
 * **Sudo:** Automatically escalated if needed (requires SSH key-based auth or cached credentials)
 * **Timeouts:** SSH connections timeout after 10 seconds to prevent hanging
 
