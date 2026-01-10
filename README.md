@@ -36,7 +36,7 @@ A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is d
 
 3.  **Run the agent:**
     ```bash
-    python stella-cli.py --model ministral-3:8b
+    python stella-cli.py --model <mode_name> (Tested with GPT_OSS:2b and ministral-3:8b)
     ```
 
 ---
