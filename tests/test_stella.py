@@ -93,3 +93,65 @@ class TestSafetyLogic:
                 
                 assert "blocked" in result.lower() or "error" in result.lower()
                 mock_run.assert_not_called()
+
+# --- FILE READING TESTS ---
+    def test_read_file_size_limit(self, tmp_path):
+        """Ensure files larger than 5MB are rejected."""
+        large_file = tmp_path / "large.log"
+        large_file.write_text("dummy content")
+        
+        # Mock getsize to pretend the file is 6MB (6,000,000 bytes)
+        with patch("os.path.getsize", return_value=6_000_000):
+            # We must force DEBUG=False because debug mode bypasses size limits
+            with patch("stella_cli.DEBUG", False): 
+                result = stella_cli.read_file(str(large_file))
+                assert "too large" in result.lower()
+
+    def test_read_file_success(self, tmp_path):
+        """Ensure normal files are read correctly."""
+        normal_file = tmp_path / "normal.txt"
+        normal_file.write_text("Hello World")
+        
+        result = stella_cli.read_file(str(normal_file))
+        assert "Hello World" in result
+
+    # --- TRUNCATION TESTS ---
+    def test_truncate_output(self):
+        """Ensure long output is truncated to Head...Tail."""
+        # Create a string longer than CTX_LENGTH * 3 (assuming default 4096 * 3 = 12288)
+        # We'll use a smaller mock CTX_LENGTH for testing to be safe/fast
+        with patch("stella_cli.CTX_LENGTH", 10):
+             with patch("stella_cli.DEBUG", False):
+                long_text = "A" * 100
+                truncated = stella_cli.truncate_output(long_text)
+                
+                assert "TRUNCATED" in truncated
+                assert len(truncated) < 100
+                # Should keep start and end
+                assert truncated.startswith("AAAAAAAA") 
+                assert truncated.endswith("AAAAAAAA")
+
+    # --- REMOTE SSH TESTS ---
+    def test_remote_command_structure(self):
+        """Ensure SSH commands include timeouts and env vars."""
+        with patch("subprocess.run") as mock_run:
+            # Mock input to auto-accept the confirmation
+            with patch("builtins.input", return_value="y"):
+                stella_cli.run_remote_command("uptime", "192.168.1.50")
+            
+            # Get the actual command sent to subprocess
+            called_args = mock_run.call_args[0][0]
+            
+            # Check for critical SSH flags
+            assert "ssh" in called_args
+            assert "-o ConnectTimeout=" in called_args
+            assert "-o BatchMode=yes" in called_args
+            # Check for Environment Injection
+            assert "export PAGER=cat" in called_args
+
+    # --- USER CONFIRMATION TESTS ---
+    def test_user_abort_on_critical(self):
+        """Ensure choosing 'n' raises UserAbort for critical commands."""
+        with patch("builtins.input", return_value="n"):
+            with pytest.raises(stella_cli.UserAbort):
+                stella_cli.run_linux_command("sudo reboot")
