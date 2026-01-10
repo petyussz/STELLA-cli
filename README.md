@@ -17,6 +17,7 @@ A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is d
 ## Installation
 
 ### Requirements
+* **Ubntu (Debian) Linux** 
 * **Python:** 3.10+ (or compatible)
 * **Ollama:** Must be installed and running locally (`ollama serve`).
 * **Dependencies:** see `requirements.txt`.
