@@ -109,8 +109,3 @@ The system uses a structured execution model:
 * **Heuristic Risk Detection:** Analyzes commands for critical patterns and blocks dangerous operations until user confirms.
 * **Spinners & Status:** Real-time feedback during LLM thinking and command execution.
 * **History & REPL:** `prompt_toolkit` integration for command history and improved navigation.
-
-### Next Steps
-* Pin versions in `requirements.txt`.
-* Add unit tests for `sanitize_command` and safety heuristics.
-* Expand remote host discovery and multi-host orchestration capabilities.
