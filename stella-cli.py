@@ -1,3 +1,5 @@
+#!/mnt/archive/venvs/langchain/bin/python
+
 import subprocess
 import os
 import re
@@ -40,7 +42,7 @@ class UserAbort(Exception):
 # --- ARGUMENT PARSING ---
 parser = argparse.ArgumentParser(description="STELLA Linux Agent")
 parser.add_argument("--model", type=str, default="ministral-3:8b", help="Ollama model to use")
-parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output") #TODO: fix debug, it hgot lost
+parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output")
 parser.add_argument("--ctx", type=str, default="4096", help="Context length for the model")
 parser.add_argument("prompt", nargs="*", help="Direct prompt for non-interactive mode")
 args = parser.parse_args()
@@ -82,13 +84,11 @@ def truncate_output(text: str) -> str:
     Smartly truncates output to keep the Head (beginning) and Tail (end).
     Crucial for reading logs where the most important info is at the bottom.
     """
-    # approx 12k chars total (leaving room for reasoning)
     MAX_CHARS = int(CTX_LENGTH * 3) 
     
     if len(text) <= MAX_CHARS:
         return text
     
-    # Keep top half and bottom half
     half = MAX_CHARS // 2
     head = text[:half]
     tail = text[-half:]
@@ -97,27 +97,35 @@ def truncate_output(text: str) -> str:
 
 def sanitize_command(cmd: str) -> str:
     """
-    Sanitizes local shell commands to prevent hanging (pager disabling, timeouts).
+    Sanitizes commands for safety and clarity.
+    1. Enforces Sudo -E (Preserve Env) so PAGER=cat works as root.
+    2. Enforces Systemctl -l (Full Length) to prevent text cutting.
+    3. Enforces Curl/Wget Timeouts (Safety).
     """
     CONN_TIMEOUT = WGET_CURL_TIMEOUT
     cmd = cmd.strip()
 
-    # Rule 1: Systemctl
+    # Rule 1: Sudo -E Enforcement
+    # We must preserve env vars (PAGER=cat) even when switching users.
+    if re.search(r"\bsudo\b", cmd):
+        # If -E is not present immediately after sudo, inject it.
+        # This regex replaces 'sudo' with 'sudo -E' if -E isn't already there.
+        # Note: This is a safe approximation.
+        if "-E" not in cmd:
+            cmd = re.sub(r"\bsudo\b", "sudo -E", cmd)
+
+    # Rule 2: Systemctl
+    # PAGER=cat prevents hanging, but systemctl still truncates lines without -l.
     if re.search(r"\bsystemctl\b", cmd):
-        if not re.search(r"--no-pager\s+.*--full|--full\s+.*--no-pager", cmd):
-            cmd = re.sub(r"\bsystemctl\b", "systemctl --no-pager --full", cmd, count=1)
+        if not re.search(r" -l\b| --full\b", cmd):
+            cmd = re.sub(r"\bsystemctl\b", "systemctl -l", cmd, count=1)
 
-    # Rule 2: Journalctl
-    if re.search(r"\bjournalctl\b", cmd):
-        if not re.search(r"--no-pager", cmd):
-            cmd = re.sub(r"\bjournalctl\b", "journalctl --no-pager", cmd, count=1)
-
-    # Rule 3: Curl
+    # Rule 3: Curl Timeout
     if re.search(r"\bcurl\b", cmd):
         if not re.search(r"(--max-time|-m)\s+\d+", cmd):
             cmd = re.sub(r"\bcurl\b", f"curl --max-time {CONN_TIMEOUT}", cmd, count=1)
 
-    # Rule 4: Wget
+    # Rule 4: Wget Timeout
     if re.search(r"\bwget\b", cmd):
         if not re.search(r"(--timeout|-T)[=\s]+\d+", cmd):
             cmd = re.sub(r"\bwget\b", f"wget --timeout={CONN_TIMEOUT}", cmd, count=1)
@@ -126,19 +134,15 @@ def sanitize_command(cmd: str) -> str:
 
 def analyze_risk(cmd: str) -> str:
     """
-    Analyzes command safety using shlex tokenization instead of regex.
+    Analyzes command safety using shlex tokenization.
     Returns 'critical' or 'low'.
     """
     try:
-        # shlex.split handles quotes correctly (e.g. 'rm -rf' inside a string is preserved)
         tokens = shlex.split(cmd)
     except ValueError:
-        # If parsing fails (e.g., unbalanced quotes), assume the worst for safety
         console.print("[dim red]Warning: Command parsing failed (unbalanced quotes). Treating as Critical.[/dim red]")
         return "critical"
 
-    # 1. Identify the 'verb' (command)
-    # We scan tokens. If we find a pipe '|', the next token is a new command.
     commands_to_check = []
     
     if tokens:
@@ -148,27 +152,22 @@ def analyze_risk(cmd: str) -> str:
         if token == "|" and i + 1 < len(tokens):
             commands_to_check.append(tokens[i+1])
         # Handle sudo: if command is sudo, the NEXT word is the actual verb
-        if token == "sudo" and i + 1 < len(tokens):
+        if token in ["sudo", "sudo -E"] and i + 1 < len(tokens):
             commands_to_check.append(tokens[i+1])
 
-    # 2. Define Critical Binaries
     CRITICAL_BINARIES = {
         "mkfs", "dd", "shutdown", "reboot", "init", 
         "chmod", "chown", "wget", "curl", "mv", "cp"
     }
 
-    # 3. Check for specific dangerous patterns
     for cmd_verb in commands_to_check:
         if cmd_verb in CRITICAL_BINARIES:
             return "critical"
         
-        # rm is only critical if recursive (-r/-R)
         if cmd_verb == "rm":
             if any(flag in tokens for flag in ["-r", "-R", "-rf", "-fr"]):
                 return "critical"
 
-    # 4. Check for dangerous redirection (writing to system dirs)
-    # This is a naive check: if we see > pointing to /etc, /boot, etc.
     if ">" in tokens:
         idx = tokens.index(">")
         if idx + 1 < len(tokens):
@@ -201,26 +200,30 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
             target_dir = cmd[3:].strip()
             target_dir = os.path.expanduser(target_dir)
             os.chdir(target_dir)
-            console.print(f"[dim]📂 CWD: {os.getcwd()}[/dim]")
+            console.print(f"[dim]ðŸ“‚ CWD: {os.getcwd()}[/dim]")
             return f"Success: Changed directory to {os.getcwd()}"
         except Exception as e:
             return f"Error changing directory: {e}"
 
-    # --- 2. Sanitize ---
+    # --- 2. Sanitize (Timeouts, Sudo -E, Systemctl -l) ---
     cmd = sanitize_command(cmd)
 
-    # --- 3. Safety Analysis (SHLEX) ---
+    # --- 3. Safety Analysis ---
     actual_sudo = sudo or "sudo" in cmd
     risk = analyze_risk(cmd)
 
     if risk == "critical":
         console.print("[bold red]CRITICAL SECURITY WARNING[/bold red]")
 
-    # --- TEXT ONLY EXECUTION NOTIFICATION ---
+    # --- 4. Sudo Argument Injection ---
+    # If the tool call explicitly requests sudo, inject "sudo -E"
+    if sudo and not cmd.startswith("sudo"):
+        cmd = f"sudo -E {cmd}"
+
     sudo_label = "[bold red]SUDO[/] " if actual_sudo else ""
     console.print(f"\n[bold green]>[/bold green] {sudo_label}[command]{cmd}[/command]")
     
-    # --- CONFIRMATION ---
+    # --- 5. Confirmation ---
     if risk == "critical" or actual_sudo:
         if not sys.stdin.isatty():
              raise UserAbort("High risk command denied (Non-interactive mode).")
@@ -233,11 +236,9 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
     if any(f" {t}" in cmd for t in forbidden) or cmd.startswith(tuple(forbidden)):
         return "Error: Interactive tools (vim, top, etc) are blocked."
 
-    if sudo and not cmd.startswith("sudo") and "|" not in cmd:
-        cmd = f"sudo {cmd}"
-
-    # --- SUDO AUTHENTICATION HANDLER ---
+    # --- 6. Sudo Authentication ---
     if actual_sudo:
+        # Check if we have tokens. We use 'sudo -n true' to check non-interactive status.
         sudo_check = subprocess.run("sudo -n true", shell=True, capture_output=True)
         if sudo_check.returncode != 0:
             console.print("[dim yellow]Sudo authentication required...[/dim yellow]")
@@ -249,11 +250,22 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
             except Exception as e:
                 return f"Error during sudo authentication: {e}"
 
-    # Execution Spinner
+    # --- 7. Execution with Safe Env ---
+    # We construct a specific environment for this subprocess to force non-interactive behavior
+    safe_env = os.environ.copy()
+    safe_env["PAGER"] = "cat"
+    safe_env["SYSTEMD_PAGER"] = "cat"
+    safe_env["TERM"] = "dumb"  # Prevents some programs from using advanced terminal features
+
     with console.status("[dim]Running...[/dim]", spinner="dots"):
         try:
             result = subprocess.run(
-                cmd, shell=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT
+                cmd, 
+                shell=True, 
+                text=True, 
+                capture_output=True, 
+                timeout=SUBPROCESS_TIMEOUT,
+                env=safe_env # <--- Inject Safe Env
             )
             output = result.stdout + result.stderr
             return truncate_output(output.strip() or "Success (No Output)")
@@ -267,25 +279,25 @@ def run_linux_command(cmd: str, sudo: bool = False) -> str:
 def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool = False) -> str:
     """
     Executes a command on a remote server via SSH. 
-    NOTE: Stateless. Chain commands: 'cd /opt/app && ./restart.sh'.
     """
     command = command.strip()
     
-    # --- 1. Risk & Sudo Analysis (SHLEX) ---
+    # --- 1. Sanitize (Timeouts, Sudo -E, Systemctl -l) ---
+    command = sanitize_command(command)
+    
+    # --- 2. Sudo Argument Injection ---
+    if sudo and not command.startswith("sudo"):
+        command = f"sudo -E -n {command}" # -n for non-interactive
+
     actual_sudo = sudo or "sudo" in command
     risk = analyze_risk(command)
 
     if risk == "critical":
         console.print("[bold red]CRITICAL SECURITY WARNING[/bold red]")
 
-    # --- 2. Sudo Flag Injection ---
-    if sudo and not command.startswith("sudo"):
-        command = f"sudo -n {command}" 
-
-    # --- 3. UI Feedback ---
     console.print(f"\n[bold cyan]>[/bold cyan] [dim]Remote ({user}@{host}):[/dim] [command]{command}[/command]")
 
-    # --- 4. User Confirmation ---
+    # --- 3. Confirmation ---
     if risk == "critical" or actual_sudo:
         if not sys.stdin.isatty():
              raise UserAbort("High risk command denied (Non-interactive mode).")
@@ -294,11 +306,16 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
         if confirm.lower() not in ["y", "yes"]:
             raise UserAbort("Action denied by user.")
 
-    # --- 5. Construct SSH Command ---
-    ssh_opts = f"-o BatchMode=yes -o ConnectTimeout={SSH_CONN_TIMEOUT} -o StrictHostKeyChecking=accept-new"
-    full_ssh_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(command)}"
+    # --- 4. Env Injection for Remote ---
+    # Since we can't pass `env=` to SSH easily, we export them in the command string.
+    # We use 'export' so they persist if the user chains commands (cmd1 && cmd2).
+    # NOTE: sudo -E (added in sanitize step) ensures these survive the root switch.
+    cmd_with_env = f"export PAGER=cat; export SYSTEMD_PAGER=cat; {command}"
 
-    # --- 6. Execution ---
+    # --- 5. SSH Execution ---
+    ssh_opts = f"-o BatchMode=yes -o ConnectTimeout={SSH_CONN_TIMEOUT} -o StrictHostKeyChecking=accept-new"
+    full_ssh_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(cmd_with_env)}"
+
     with console.status(f"[dim]Connecting to {host}...[/dim]", spinner="earth"):
         try:
             result = subprocess.run(
@@ -316,10 +333,7 @@ def run_remote_command(command: str, host: str, user: str = "admin", sudo: bool 
 
 @tool
 def write_file(file_path: str, content: str) -> str:
-    """
-    Writes text content to a file on the LOCAL machine.
-    Use this to create helper scripts (Python/Bash) or save output.
-    """
+    """Writes text content to a file on the LOCAL machine."""
     try:
         target_path = os.path.expanduser(file_path)
         if target_path.startswith(("/etc", "/boot", "/usr", "/var/lib")):
@@ -336,24 +350,19 @@ def write_file(file_path: str, content: str) -> str:
 
 @tool
 def read_file(file_path: str) -> str:
-    """
-    Reads the content of a file from the LOCAL machine.
-    Useful for inspecting config files, logs, or scripts before editing them.
-    """
+    """Reads the content of a file from the LOCAL machine."""
     try:
         target_path = os.path.expanduser(file_path)
         if not os.path.exists(target_path):
             return f"Error: File not found: {target_path}"
         
-        # We increase the hard limit to 5MB, allowing truncate_output to handle
-        # the context protection, while preventing massive memory spikes.
         if os.path.getsize(target_path) > 5_000_000:
-            return "Error: File is too large (>5MB) to read directly. Use 'grep' or 'head' via run_linux_command instead."
+            return "Error: File is too large (>5MB). Use run_linux_command with grep/head."
 
         with open(target_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
             
-        console.print(f"[dim]📄 Read file: {target_path}[/dim]")
+        console.print(f"[dim]ðŸ“„ Read file: {target_path}[/dim]")
         return truncate_output(content)
 
     except Exception as e:
@@ -372,6 +381,7 @@ system_prompt_agent = SystemMessage(
 You are STELLA.
 1. Plan briefly.
 2. Execute locally ('run_linux_command', 'read_file', 'write_file') or remotely ('run_remote_command').
+   -Managed host information is located in the file: /home/administrator/managed_hosts.json. Use that for reference if no information provided
 3. Summarize findings.
 4. Use Markdown.
 
@@ -403,7 +413,6 @@ else:
 if not sys.stdin.isatty():
     stdin_content = sys.stdin.read().strip()
     cli_prompt = " ".join(args.prompt).strip()
-    # Truncate input as well to be safe
     stdin_content = truncate_output(stdin_content)
     full_prompt = f"Context:\n{stdin_content}\n\nInstruction: {cli_prompt}" if cli_prompt else f"Analyze:\n{stdin_content}"
     
