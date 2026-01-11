@@ -3,10 +3,10 @@
 A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is designed to run smaller models locally (via a local Ollama instance) to perform system administration tasks and execute controlled shell commands with safety and transparency. 
 
 **Interactive Mode:**
-![STELLA Interactive Demo](assets/stella.gif)
+<img src="assets/stella.gif" width="800" alt="STELLA Interactive Demo" />
 
 **Non-Interactive Mode:**
-![STELLA Non-Interactive Demo](assets/stella_cpu.gif)
+<img src="assets/stella_cpu.gif" width="800" alt="STELLA Non-Interactive Demo" />
 
 ---
 
