@@ -44,6 +44,8 @@ parser.add_argument("--model", type=str, default="ministral-3:8b", help="Ollama 
 parser.add_argument("--debug", action="store_true", help="Show raw reasoning and subprocess output")
 parser.add_argument("--ctx", type=str, default="4096", help="Context length for the model")
 parser.add_argument("--keepalive", type=str, default="5m", help="Ollama keepalive (0 for permanent)")
+parser.add_argument("--ollama-server", type=str, default="localhost", help="Ollama server address")
+parser.add_argument("--ollama-port", type=str, default="11434", help="Ollama server port")
 parser.add_argument("prompt", nargs="*", help="Direct prompt for non-interactive mode")
 # Use parse_known_args in case pytest injects weird args, though mocking argv usually handles this
 args, _ = parser.parse_known_args()
@@ -57,6 +59,7 @@ SUBPROCESS_TIMEOUT = 30
 SSH_CONN_TIMEOUT = 10
 WGET_CURL_TIMEOUT = 60
 OLLAMA_KEEPALIVE = args.keepalive
+OLLAMA_BASE_URL = f"http://{args.ollama_server}:{args.ollama_port}"
 
 
 # --- SPINNER & DEBUG HANDLER ---
@@ -320,7 +323,7 @@ def read_file(file_path: str) -> str:
 
 
 # --- LLM & AGENT ---
-llm = ChatOllama(model=MODEL, temperature=0.1, num_ctx=CTX_LENGTH, keep_alive=OLLAMA_KEEPALIVE)
+llm = ChatOllama(model=MODEL, temperature=0.1, num_ctx=CTX_LENGTH, keep_alive=OLLAMA_KEEPALIVE, base_url=OLLAMA_BASE_URL)
 
 system_prompt_agent = SystemMessage(content="""
 You are STELLA.

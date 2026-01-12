@@ -62,6 +62,8 @@ A lightweight, standalone STELLA Linux agent. This script (`stella-cli.py`) is d
 * `--model`: Specify the Ollama model to use (default: `ministral-3:8b`).
 * `--ctx`: Set context window size in tokens (default: `4096`).
 * `--keepalive`: How long to keep the model loaded in memory (default: `5m`; set to `0` for permanent).
+* `--ollama-server`: Ollama server IP/hostname (default: `localhost`).
+* `--ollama-port`: Ollama server port (default: `11434`).
 * `--debug`: View model reasoning, subprocess output, and internal logs.
 
 ### Remote Execution
